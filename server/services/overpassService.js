@@ -1,526 +1,250 @@
 const axios = require("axios");
 
-/*
- * Overpass service
- *
- * Returns nearby OSM places useful for:
- * - customers
- * - commuters
- * - students
- * - office workers
- * - industrial workers
- * - warehouse/logistics workers
- * - construction workers
- * - local residents
- */
-
 const OVERPASS_ENDPOINTS = [
   "https://overpass-api.de/api/interpreter",
   "https://overpass.kumi.systems/api/interpreter",
-  "https://overpass.private.coffee/api/interpreter",
 ];
 
-/**
- * Build Overpass query.
- *
- * We intentionally query several types of places because OSM does not
- * directly provide "number of workers". Industrial, warehouse,
- * construction, office and transport features are used as worker-demand
- * proxies.
- */
-function buildQuery(lat, lon, radius) {
-  return `
-[out:json][timeout:60];
+const DEFAULT_RADIUS = 1000;
 
-(
-  /* =========================
-     FOOD & RETAIL
-     ========================= */
+function validateCoordinates(lat, lon) {
+  if (!Number.isFinite(lat) || !Number.isFinite(lon)) {
+    throw new Error("Latitude and longitude must be valid numbers.");
+  }
 
-  nwr["amenity"="restaurant"](around:${radius},${lat},${lon});
-  nwr["amenity"="fast_food"](around:${radius},${lat},${lon});
-  nwr["amenity"="cafe"](around:${radius},${lat},${lon});
-  nwr["shop"="supermarket"](around:${radius},${lat},${lon});
-  nwr["shop"="convenience"](around:${radius},${lat},${lon});
-  nwr["shop"="bakery"](around:${radius},${lat},${lon});
-  nwr["shop"="confectionery"](around:${radius},${lat},${lon});
-  nwr["shop"="variety_store"](around:${radius},${lat},${lon});
+  if (lat < -90 || lat > 90) {
+    throw new Error("Latitude must be between -90 and 90.");
+  }
 
-  /* =========================
-     EDUCATION
-     ========================= */
-
-  nwr["amenity"="school"](around:${radius},${lat},${lon});
-  nwr["amenity"="college"](around:${radius},${lat},${lon});
-  nwr["amenity"="university"](around:${radius},${lat},${lon});
-  nwr["amenity"="kindergarten"](around:${radius},${lat},${lon});
-
-  /* =========================
-     TRANSPORT / COMMUTERS
-     ========================= */
-
-  nwr["highway"="bus_stop"](around:${radius},${lat},${lon});
-  nwr["public_transport"="platform"](around:${radius},${lat},${lon});
-  nwr["amenity"="bus_station"](around:${radius},${lat},${lon});
-  nwr["amenity"="taxi"](around:${radius},${lat},${lon});
-  nwr["amenity"="fuel"](around:${radius},${lat},${lon});
-
-  /* =========================
-     OFFICES / COMMERCIAL
-     ========================= */
-
-  nwr["office"](around:${radius},${lat},${lon});
-  nwr["building"="office"](around:${radius},${lat},${lon});
-  nwr["building"="commercial"](around:${radius},${lat},${lon});
-  nwr["landuse"="commercial"](around:${radius},${lat},${lon});
-
-  /* =========================
-     INDUSTRIAL / FACTORIES
-     ========================= */
-
-  nwr["landuse"="industrial"](around:${radius},${lat},${lon});
-  nwr["industrial"](around:${radius},${lat},${lon});
-  nwr["man_made"="works"](around:${radius},${lat},${lon});
-  nwr["man_made"="works"](around:${radius},${lat},${lon});
-  nwr["building"="industrial"](around:${radius},${lat},${lon});
-
-  /* =========================
-     FACTORIES / MANUFACTURING
-     ========================= */
-
-  nwr["craft"](around:${radius},${lat},${lon});
-  nwr["craft"="factory"](around:${radius},${lat},${lon});
-  nwr["industrial"="factory"](around:${radius},${lat},${lon});
-  nwr["industrial"="manufacturing"](around:${radius},${lat},${lon});
-
-  /* =========================
-     WAREHOUSE / STORAGE
-     ========================= */
-
-  nwr["building"="warehouse"](around:${radius},${lat},${lon});
-  nwr["building"="storage"](around:${radius},${lat},${lon});
-  nwr["industrial"="warehouse"](around:${radius},${lat},${lon});
-  nwr["industrial"="storage"](around:${radius},${lat},${lon});
-  nwr["landuse"="depot"](around:${radius},${lat},${lon});
-  nwr["amenity"="loading_dock"](around:${radius},${lat},${lon});
-
-  /* =========================
-     LOGISTICS / DISTRIBUTION
-     ========================= */
-
-  nwr["industrial"="logistics"](around:${radius},${lat},${lon});
-  nwr["industrial"="distribution"](around:${radius},${lat},${lon});
-  nwr["office"="logistics"](around:${radius},${lat},${lon});
-  nwr["amenity"="parcel_locker"](around:${radius},${lat},${lon});
-
-  /* =========================
-     CONSTRUCTION / LABOUR SITES
-     ========================= */
-
-  nwr["landuse"="construction"](around:${radius},${lat},${lon});
-  nwr["construction"](around:${radius},${lat},${lon});
-  nwr["building"="construction"](around:${radius},${lat},${lon});
-
-  /* =========================
-     WORKSHOPS / REPAIR
-     ========================= */
-
-  nwr["shop"="car_repair"](around:${radius},${lat},${lon});
-  nwr["shop"="motorcycle_repair"](around:${radius},${lat},${lon});
-  nwr["shop"="bicycle"](around:${radius},${lat},${lon});
-  nwr["craft"="carpenter"](around:${radius},${lat},${lon});
-  nwr["craft"="metal_construction"](around:${radius},${lat},${lon});
-  nwr["craft"="welder"](around:${radius},${lat},${lon});
-  nwr["craft"="plumber"](around:${radius},${lat},${lon});
-  nwr["craft"="electrician"](around:${radius},${lat},${lon});
-
-  /* =========================
-     MARKETS / RESIDENTIAL
-     ========================= */
-
-  nwr["amenity"="marketplace"](around:${radius},${lat},${lon});
-  nwr["landuse"="residential"](around:${radius},${lat},${lon});
-
-  /* =========================
-     HOTELS / TRAVEL
-     ========================= */
-
-  nwr["tourism"="hotel"](around:${radius},${lat},${lon});
-  nwr["tourism"="hostel"](around:${radius},${lat},${lon});
-  nwr["tourism"="guest_house"](around:${radius},${lat},${lon});
-);
-
-out center tags;
-`;
+  if (lon < -180 || lon > 180) {
+    throw new Error("Longitude must be between -180 and 180.");
+  }
 }
 
-/**
- * Convert an OSM element into a simple application object.
- */
-function normalizePlace(element) {
-  const tags = element.tags || {};
+function getElementCoordinates(element) {
+  // Node
+  if (
+    element.type === "node" &&
+    Number.isFinite(element.lat) &&
+    Number.isFinite(element.lon)
+  ) {
+    return {
+      lat: element.lat,
+      lon: element.lon,
+    };
+  }
 
-  let lat = element.lat;
-  let lon = element.lon;
-
-  // Ways and relations normally return center coordinates.
-  if (lat == null && element.center) {
-    lat = element.center.lat;
-    lon = element.center.lon;
+  // Way / Relation with Overpass center
+  if (
+    element.center &&
+    Number.isFinite(element.center.lat) &&
+    Number.isFinite(element.center.lon)
+  ) {
+    return {
+      lat: element.center.lat,
+      lon: element.center.lon,
+    };
   }
 
   return {
-    id: element.id,
-    type: element.type,
-    name:
-      tags.name ||
-      tags["name:en"] ||
-      "Unnamed",
-
-    category: detectCategory(tags),
-
-    lat,
-    lon,
-
-    tags,
+    lat: null,
+    lon: null,
   };
 }
 
-/**
- * Detect the business/use category from OSM tags.
- *
- * More specific categories are checked before generic ones.
- */
-function detectCategory(tags) {
-  /* Food */
+function getPlaceName(element) {
+  const tags = element.tags || {};
+
+  return (
+    tags.name ||
+    tags["name:en"] ||
+    tags.brand ||
+    tags.operator ||
+    "Unnamed"
+  );
+}
+
+function getCategory(tags) {
+  if (!tags) {
+    return "other";
+  }
+
+  if (tags.amenity === "hospital") return "hospital";
+  if (tags.amenity === "clinic") return "clinic";
+  if (tags.amenity === "pharmacy") return "pharmacy";
+
+  if (tags.amenity === "school") return "school";
+  if (tags.amenity === "college") return "college";
+  if (tags.amenity === "university") return "university";
+
   if (tags.amenity === "restaurant") return "restaurant";
   if (tags.amenity === "fast_food") return "fast_food";
   if (tags.amenity === "cafe") return "cafe";
+  if (tags.amenity === "food_court") return "food_court";
 
-  /* Education */
-  if (tags.amenity === "university") return "university";
-  if (tags.amenity === "college") return "college";
-  if (tags.amenity === "school") return "school";
-  if (tags.amenity === "kindergarten") return "kindergarten";
+  if (tags.tourism === "hotel") return "hotel";
 
-  /* Transport */
-  if (tags.highway === "bus_stop") return "bus_stop";
-  if (tags.public_transport === "platform") return "transport_platform";
-  if (tags.amenity === "bus_station") return "bus_station";
-  if (tags.amenity === "taxi") return "taxi";
-  if (tags.amenity === "fuel") return "fuel";
-
-  /* Retail */
   if (tags.shop === "supermarket") return "supermarket";
   if (tags.shop === "convenience") return "convenience_store";
   if (tags.shop === "bakery") return "bakery";
-  if (tags.shop === "confectionery") return "confectionery";
-  if (tags.shop === "variety_store") return "variety_store";
+  if (tags.shop === "department_store") return "department_store";
+  if (tags.shop) return tags.shop;
 
-  /* Construction */
-  if (
-    tags.landuse === "construction" ||
-    tags.construction ||
-    tags.building === "construction"
-  ) {
-    return "construction_site";
-  }
+  if (tags.highway === "bus_stop") return "bus_stop";
 
-  /* Warehouses */
-  if (
-    tags.building === "warehouse" ||
-    tags.building === "storage" ||
-    tags.industrial === "warehouse" ||
-    tags.industrial === "storage"
-  ) {
-    return "warehouse";
-  }
+  if (tags.amenity === "marketplace") return "marketplace";
 
-  /* Logistics */
-  if (
-    tags.industrial === "logistics" ||
-    tags.industrial === "distribution" ||
-    tags.office === "logistics"
-  ) {
-    return "logistics";
-  }
+  if (tags.leisure === "fitness_centre") return "gym";
 
-  /* Industrial */
-  if (
-    tags.landuse === "industrial" ||
-    tags.industrial ||
-    tags.building === "industrial" ||
-    tags.man_made === "works"
-  ) {
-    return "industrial";
-  }
-
-  /* Factory */
-  if (
-    tags.industrial === "factory" ||
-    tags.industrial === "manufacturing" ||
-    tags.craft === "factory"
-  ) {
-    return "factory";
-  }
-
-  /* Workshops */
-  if (
-    tags.shop === "car_repair" ||
-    tags.shop === "motorcycle_repair" ||
-    tags.shop === "bicycle" ||
-    tags.craft
-  ) {
-    return "workshop";
-  }
-
-  /* Offices */
-  if (
-    tags.office ||
-    tags.building === "office" ||
-    tags.building === "commercial" ||
-    tags.landuse === "commercial"
-  ) {
-    return "office";
-  }
-
-  /* Markets */
-  if (tags.amenity === "marketplace") {
-    return "marketplace";
-  }
-
-  /* Residential */
-  if (tags.landuse === "residential") {
-    return "residential";
-  }
-
-  /* Hotels */
-  if (tags.tourism === "hotel") return "hotel";
-  if (tags.tourism === "hostel") return "hostel";
-  if (tags.tourism === "guest_house") return "guest_house";
+  if (tags.office) return "office";
 
   return "other";
 }
 
-/**
- * Remove duplicate OSM objects.
- */
-function deduplicatePlaces(places) {
-  const seen = new Set();
-
-  return places.filter((place) => {
-    const key = `${place.type}-${place.id}`;
-
-    if (seen.has(key)) {
-      return false;
-    }
-
-    seen.add(key);
-    return true;
-  });
-}
-
-/**
- * Create a category summary.
- */
-function buildCategorySummary(places) {
-  const summary = {};
-
-  for (const place of places) {
-    summary[place.category] = (summary[place.category] || 0) + 1;
-  }
-
-  return summary;
-}
-
-/**
- * Build higher-level business signals for the Location Agent.
- */
-function buildLocationSignals(places) {
-  const count = (category) =>
-    places.filter((place) => place.category === category).length;
+function normalizeElement(element) {
+  const tags = element.tags || {};
+  const coordinates = getElementCoordinates(element);
 
   return {
-    food: {
-      restaurants: count("restaurant"),
-      fastFood: count("fast_food"),
-      cafes: count("cafe"),
-    },
+    id: element.id,
+    type: element.type,
 
-    education: {
-      schools: count("school"),
-      colleges: count("college"),
-      universities: count("university"),
-      kindergartens: count("kindergarten"),
-    },
+    name: getPlaceName(element),
 
-    transport: {
-      busStops: count("bus_stop"),
-      busStations: count("bus_station"),
-      transportPlatforms: count("transport_platform"),
-      fuelStations: count("fuel"),
-    },
+    category: getCategory(tags),
 
-    commercial: {
-      offices: count("office"),
-      supermarkets: count("supermarket"),
-      convenienceStores: count("convenience_store"),
-      marketplaces: count("marketplace"),
-    },
+    lat: coordinates.lat,
+    lon: coordinates.lon,
 
-    worker: {
-      factories: count("factory"),
-      industrialSites: count("industrial"),
-      warehouses: count("warehouse"),
-      logisticsSites: count("logistics"),
-      constructionSites: count("construction_site"),
-      workshops: count("workshop"),
-    },
-
-    travel: {
-      hotels: count("hotel"),
-      hostels: count("hostel"),
-      guestHouses: count("guest_house"),
-    },
-
-    residential: {
-      residentialAreas: count("residential"),
-    },
+    // IMPORTANT:
+    // Keep original OSM tags.
+    // analyzeService.js uses these.
+    tags,
   };
 }
 
-/**
- * Main function.
- *
- * @param {number} lat
- * @param {number} lon
- * @param {number} radius Radius in meters
- */
-async function getNearbyPlaces(lat, lon, radius = 1000) {
-  if (!Number.isFinite(Number(lat))) {
-    throw new Error("Invalid latitude");
+async function queryOverpass(endpoint, query) {
+  const response = await axios.post(endpoint, query, {
+    timeout: 30000,
+
+    headers: {
+      "Content-Type": "text/plain; charset=utf-8",
+      Accept: "application/json",
+      "User-Agent": "Cart-Location-MVP/1.0",
+    },
+  });
+
+  return response.data;
+}
+
+async function getNearbyPlaces(latitude, longitude, radius = DEFAULT_RADIUS) {
+  const lat = Number(latitude);
+  const lon = Number(longitude);
+  const searchRadius = Number(radius);
+
+  validateCoordinates(lat, lon);
+
+  if (!Number.isFinite(searchRadius) || searchRadius <= 0) {
+    throw new Error("Radius must be a positive number.");
   }
 
-  if (!Number.isFinite(Number(lon))) {
-    throw new Error("Invalid longitude");
+  if (searchRadius > 5000) {
+    throw new Error("Radius cannot be greater than 5000 meters.");
   }
-
-  if (!Number.isFinite(Number(radius)) || Number(radius) <= 0) {
-    throw new Error("Invalid radius");
-  }
-
-  lat = Number(lat);
-  lon = Number(lon);
-  radius = Number(radius);
 
   console.log("Querying Overpass...");
   console.log(`Coordinates: ${lat}, ${lon}`);
-  console.log(`Radius: ${radius}m`);
+  console.log(`Radius: ${searchRadius}m`);
 
-  const query = buildQuery(lat, lon, radius);
+  /*
+   * We use nwr:
+   *
+   * n = nodes
+   * w = ways
+   * r = relations
+   *
+   * This gives us more complete information than only searching nodes.
+   *
+   * around:radius,latitude,longitude
+   */
+  const query = `
+[out:json][timeout:25];
+
+(
+  nwr["amenity"="hospital"](around:${searchRadius},${lat},${lon});
+  nwr["amenity"="clinic"](around:${searchRadius},${lat},${lon});
+  nwr["amenity"="pharmacy"](around:${searchRadius},${lat},${lon});
+
+  nwr["amenity"="school"](around:${searchRadius},${lat},${lon});
+  nwr["amenity"="college"](around:${searchRadius},${lat},${lon});
+  nwr["amenity"="university"](around:${searchRadius},${lat},${lon});
+
+  nwr["amenity"="restaurant"](around:${searchRadius},${lat},${lon});
+  nwr["amenity"="fast_food"](around:${searchRadius},${lat},${lon});
+  nwr["amenity"="cafe"](around:${searchRadius},${lat},${lon});
+  nwr["amenity"="food_court"](around:${searchRadius},${lat},${lon});
+
+  nwr["tourism"="hotel"](around:${searchRadius},${lat},${lon});
+
+  nwr["shop"="supermarket"](around:${searchRadius},${lat},${lon});
+  nwr["shop"="convenience"](around:${searchRadius},${lat},${lon});
+  nwr["shop"="bakery"](around:${searchRadius},${lat},${lon});
+  nwr["shop"="department_store"](around:${searchRadius},${lat},${lon});
+
+  nwr["highway"="bus_stop"](around:${searchRadius},${lat},${lon});
+
+  nwr["amenity"="marketplace"](around:${searchRadius},${lat},${lon});
+
+  nwr["leisure"="fitness_centre"](around:${searchRadius},${lat},${lon});
+
+  nwr["office"](around:${searchRadius},${lat},${lon});
+);
+
+out center tags;
+`;
 
   let lastError = null;
 
   for (const endpoint of OVERPASS_ENDPOINTS) {
     try {
-      console.log(`Trying Overpass endpoint: ${endpoint}`);
+      const data = await queryOverpass(endpoint, query);
 
-      const response = await axios.post(
-        endpoint,
-        query,
-        {
-          headers: {
-            "Content-Type": "text/plain",
-            Accept: "application/json",
-            "User-Agent": "cart-location-mvp/1.0",
-          },
-
-          timeout: 90000,
-
-          // Prevent axios from treating a non-JSON HTML error as success.
-          validateStatus: () => true,
-        }
-      );
-
-      console.log(`Overpass HTTP status: ${response.status}`);
-
-      if (response.status !== 200) {
-        const body =
-          typeof response.data === "string"
-            ? response.data.substring(0, 500)
-            : JSON.stringify(response.data).substring(0, 500);
-
-        console.log(`Overpass endpoint failed: ${body}`);
-
-        lastError = new Error(
-          `Overpass request failed with status ${response.status}`
-        );
-
-        continue;
+      if (!data || !Array.isArray(data.elements)) {
+        throw new Error("Invalid response received from Overpass API.");
       }
 
-      const elements = Array.isArray(response.data?.elements)
-        ? response.data.elements
-        : [];
+      console.log("Overpass HTTP request successful.");
+      console.log(`Found ${data.elements.length} places`);
 
-      console.log("Overpass request completed.");
+      const places = data.elements
+        .map(normalizeElement)
+        .filter((place) => place.lat !== null && place.lon !== null);
 
-      let places = elements
-        .map(normalizePlace)
-        .filter(
-          (place) =>
-            place.lat != null &&
-            place.lon != null
-        );
-
-      places = deduplicatePlaces(places);
-
-      const categorySummary = buildCategorySummary(places);
-      const signals = buildLocationSignals(places);
-
-      console.log(`Found ${places.length} places`);
-
-      console.log("Category summary:");
-      console.log(categorySummary);
-
-      console.log("Worker signals:");
-      console.log(signals.worker);
-
-      return {
-        success: true,
-
-        center: {
-          lat,
-          lon,
-        },
-
-        radius,
-
-        count: places.length,
-
-        categorySummary,
-
-        signals,
-
-        places,
-      };
+      return places;
     } catch (error) {
-      console.error(
-        `Overpass endpoint error: ${endpoint}`,
-        error.message
-      );
-
       lastError = error;
+
+      if (error.response) {
+        console.error(
+          `Overpass API error from ${endpoint}:`,
+          error.response.status
+        );
+      } else {
+        console.error(
+          `Overpass request failed for ${endpoint}:`,
+          error.message
+        );
+      }
     }
   }
 
-  throw lastError || new Error("All Overpass endpoints failed");
+  throw new Error(
+    `Failed to fetch data from all Overpass servers. Last error: ${
+      lastError ? lastError.message : "Unknown error"
+    }`
+  );
 }
 
 module.exports = {
   getNearbyPlaces,
-  buildQuery,
-  detectCategory,
-  buildCategorySummary,
-  buildLocationSignals,
 };
