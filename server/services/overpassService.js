@@ -3,6 +3,7 @@ const axios = require("axios");
 const OVERPASS_ENDPOINTS = [
   "https://overpass-api.de/api/interpreter",
   "https://overpass.kumi.systems/api/interpreter",
+  "https://maps.mail.ru/osm/tools/overpass/api/interpreter",
 ];
 
 const DEFAULT_RADIUS = 1000;

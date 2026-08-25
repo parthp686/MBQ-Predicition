@@ -1,275 +1,100 @@
-require("dotenv").config();
-
 const Groq = require("groq-sdk");
-
-if (!process.env.GROQ_API_KEY) {
-  throw new Error("GROQ_API_KEY is missing from .env");
-}
 
 const groq = new Groq({
   apiKey: process.env.GROQ_API_KEY,
 });
 
-function validateRecommendation(result) {
-  if (!result || typeof result !== "object") {
-    throw new Error("AI returned an invalid response.");
-  }
+/*
+==========================================================
+STEP 1
+Analyze the area and determine PRODUCT TYPES.
+==========================================================
+*/
 
-  if (!result.areaType || typeof result.areaType !== "object") {
-    throw new Error("AI response is missing areaType.");
-  }
-
-  if (!Array.isArray(result.customerSegments)) {
-    throw new Error("AI response is missing customerSegments.");
-  }
-
-  if (!Array.isArray(result.recommendations)) {
-    throw new Error("AI response is missing recommendations.");
-  }
-
-  if (!Array.isArray(result.avoidOrLimit)) {
-    throw new Error("AI response is missing avoidOrLimit.");
-  }
-
-  if (result.recommendations.length < 8) {
-    throw new Error(
-      `AI returned only ${result.recommendations.length} recommendations. Minimum is 8.`
-    );
-  }
-
-  if (result.recommendations.length > 15) {
-    result.recommendations = result.recommendations.slice(0, 15);
-  }
-
-  if (result.customerSegments.length < 3) {
-    throw new Error(
-      "AI returned fewer than 3 customer segments."
-    );
-  }
-
-  if (result.customerSegments.length > 6) {
-    result.customerSegments = result.customerSegments.slice(0, 6);
-  }
-
-  if (result.avoidOrLimit.length < 3) {
-    throw new Error(
-      "AI returned fewer than 3 avoid/limit products."
-    );
-  }
-
-  return result;
-}
-
-async function generateRecommendation(locationData) {
-  if (!locationData || typeof locationData !== "object") {
-    throw new Error("locationData must be an object.");
-  }
-
+async function generateProductDemand(locationData) {
   const response = await groq.chat.completions.create({
     model: "openai/gpt-oss-20b",
-
-    temperature: 0.3,
 
     messages: [
       {
         role: "system",
-
         content: `
-You are an AI retail location advisor for a small mobile
-shopping cart operating in India.
+You are a retail location advisor for a small mobile cart in India.
 
-Your job is NOT to simply list nearby places.
+Your job is to determine which PRODUCT TYPES are likely
+to have demand in the given location.
 
-Your job is to reason about the LOCAL DEMAND POTENTIAL
-and suggest what products the cart should initially stock.
+Analyze:
 
-BUSINESS MODEL:
-
-The owner operates a small fixed-location cart.
+- nearby places
+- hospitals
+- clinics
+- pharmacies
+- schools
+- colleges
+- offices
+- restaurants
+- fast food
+- cafes
+- bus stops
+- supermarkets
+- markets
+- hotels
 
 The cart has:
 
-- Limited physical space
-- Limited storage
-- Limited starting capital
-- No large refrigerator
-- Preference for products with good shelf life
-- Preference for low-cost products
-- Preference for products that can sell quickly
-- Preference for products suitable for impulse purchases
-
-Typical products include:
-
-- Biscuits
-- Chips
-- Namkeen
-- Bakery products
-- Chocolates
-- Small packaged snacks
-- Bottled water
-- Packaged beverages
-- Juice
-- Tea
-- Coffee
-- Small convenience products
-- Small daily-use products
-
-IMPORTANT BUSINESS OBJECTIVE:
-
-This is the INITIAL STOCKING decision.
-
-The owner wants to understand:
-
-1. What type of area this is
-2. Who is likely to buy from the cart
-3. What affordable products should be stocked initially
-4. Which products should receive higher priority
-5. Why each product may perform well
-6. Which products should be avoided or kept limited
-
-The goal is to start with a LOW-RISK assortment.
-
-Do NOT recommend large expensive inventory.
-
-Do NOT recommend:
-
-- Large rice bags
-- Large wheat bags
-- Large cooking oil bottles
-- Large grocery packages
-- Highly perishable products
-- Products requiring expensive refrigeration
-- Products requiring large storage space
-- Expensive slow-moving inventory
+- limited space
+- limited storage
+- limited starting capital
+- no large refrigerator
+- preference for affordable products
+- preference for long shelf life
+- preference for fast-moving products
 
 Prefer:
 
-- Small packaged products
-- Low-price products
-- Fast-moving products
-- Long shelf-life products
-- Grab-and-go products
-- Impulse-buy products
-- Products suitable for students
-- Products suitable for office workers
-- Products suitable for commuters
-- Products suitable for hospital visitors/staff
-- Products suitable for local residents
+- Biscuits
+- Snacks
+- Namkeen
+- Chocolates
+- Beverages
+- Packaged water
+- Juice
+- Tea
+- Coffee
+- Mouth fresheners
+- Small convenience products
 
-AREA ANALYSIS:
+Avoid:
 
-Use the supplied location data to identify the most likely
-primary area type.
-
-Possible examples:
-
-- hospital area
-- student area
-- residential area
-- office area
-- commercial area
-- transport area
-- mixed commercial area
-- food area
-- market area
-- mixed-use area
-
-You may choose another appropriate area type if the data
-supports it.
-
-CUSTOMER SEGMENTS:
-
-Identify 3 to 6 important customer groups.
-
-Examples:
-
-- students
-- office workers
-- hospital staff
-- hospital visitors
-- commuters
-- local residents
-- shoppers
-- tourists
-
-PRODUCT RECOMMENDATIONS:
-
-Return between 8 and 15 products.
-
-Sort them from highest priority to lowest priority.
-
-Priority must be exactly one of:
-
-very_high
-high
-medium
-low
+- large grocery packages
+- large rice bags
+- large wheat bags
+- large oil bottles
+- highly perishable products
+- expensive refrigerated products
 
 IMPORTANT:
 
-Do NOT assume that nearby places guarantee sales.
+Location data does NOT prove that a product will sell.
 
-Location data only provides signals about possible demand.
-
-Use language such as:
+Use terms such as:
 
 "likely demand"
 "potential demand"
 "may perform well"
-"could be useful"
 
-Do not claim certainty.
+Return ONLY JSON.
 
-AFFORDABILITY:
-
-Prefer products that can be sold at affordable small-ticket
-prices.
-
-Think about products that a customer could buy quickly
-without making a large spending decision.
-
-INITIAL STOCKING:
-
-Think like a small business owner with limited capital.
-
-The recommendations should be practical for the FIRST STOCK.
-
-The owner can later restock based on actual sales.
-
-RETURN ONLY VALID JSON.
-
-Do not use markdown.
-
-Do not add explanations outside JSON.
-
-Use EXACTLY this structure:
+Use exactly this structure:
 
 {
-  "areaType": {
-    "primary": "string",
-    "confidence": 0.0,
-    "reason": "string"
-  },
-
-  "customerSegments": [
+  "areaType": "string",
+  "customerSegments": ["string"],
+  "productTypes": [
     {
-      "segment": "string",
-      "importance": "low | medium | high",
-      "reason": "string"
-    }
-  ],
-
-  "recommendations": [
-    {
-      "product": "string",
-      "priority": "low | medium | high | very_high",
-      "reason": "string"
-    }
-  ],
-
-  "avoidOrLimit": [
-    {
-      "product": "string",
+      "type": "string",
+      "priority": "very_high",
       "reason": "string"
     }
   ]
@@ -277,36 +102,25 @@ Use EXACTLY this structure:
 
 Rules:
 
-- customerSegments: minimum 3, maximum 6
-- recommendations: minimum 8, maximum 15
-- avoidOrLimit: minimum 3
-- confidence must be between 0 and 1
-- priority must be low, medium, high or very_high
-- importance must be low, medium or high
-- Return valid JSON only
+- productTypes: 5 to 12 items
+- customerSegments: 3 to 6 items
+- priority must be:
+  very_high
+  high
+  medium
+  low
+
+Do not use markdown.
+Do not add text outside JSON.
 `,
       },
 
       {
         role: "user",
-
         content: `
-Analyze the following location information.
+Analyze this location:
 
-The data comes from OpenStreetMap/Overpass and represents
-nearby places around the proposed cart location.
-
-Use the counts as signals of the type of area.
-
-LOCATION DATA:
-
-${JSON.stringify(locationData, null, 2)}
-
-Remember:
-
-Nearby places do NOT prove that a product will sell.
-
-Use reasonable demand inference rather than certainty.
+${JSON.stringify(locationData)}
 `,
       },
     ],
@@ -318,30 +132,401 @@ Use reasonable demand inference rather than certainty.
     include_reasoning: false,
   });
 
-  const content = response?.choices?.[0]?.message?.content;
+  const content = response.choices[0].message.content;
 
-  if (!content) {
-    throw new Error("Groq returned an empty response.");
-  }
+  console.log("");
+  console.log("AI PRODUCT DEMAND:");
+  console.log(content);
 
   try {
-    const result = JSON.parse(content);
-
-    return validateRecommendation(result);
+    return JSON.parse(content);
   } catch (error) {
     console.error("Invalid JSON returned by Groq:");
     console.error(content);
 
-    if (error.message.startsWith("AI response")) {
-      throw error;
-    }
-
     throw new Error(
-      `AI returned invalid JSON: ${error.message}`
+      "AI returned invalid product demand JSON"
     );
   }
 }
 
+
+/*
+==========================================================
+STEP 2
+Select the BEST REAL PRODUCTS from MongoDB.
+
+IMPORTANT:
+AI is NOT allowed to invent products.
+
+AI only returns productId values.
+
+Node.js will attach the real product information later.
+==========================================================
+*/
+
+async function generateFinalRecommendation(
+  locationData,
+  productDemand,
+  products
+) {
+  /*
+  Keep the candidate data small.
+
+  The AI does NOT need the complete MongoDB document.
+  */
+
+  const compactProducts = products.map((product) => ({
+    productId: String(product.productId),
+    productName: product.productName,
+    sku: product.sku,
+    brand: product.brand,
+    category: product.category,
+    subCategory: product.subCategory,
+    mrp: Number(product.mrp || 0),
+    cost: Number(product.cost || 0),
+    coldChainProduct: Boolean(product.coldChainProduct),
+    shelfLife: Number(product.shelfLife || 0),
+  }));
+
+  console.log("");
+  console.log("STEP 5: AI selecting final products...");
+  console.log(
+    `Sending ${compactProducts.length} products to final AI`
+  );
+
+  /*
+  IMPORTANT:
+
+  We don't ask the AI to reproduce all product information.
+
+  It only needs to return IDs and recommendation information.
+  */
+
+  const prompt = `
+AREA ANALYSIS:
+
+${JSON.stringify(locationData.areaAnalysis)}
+
+PRODUCT DEMAND:
+
+${JSON.stringify(productDemand.productTypes)}
+
+AVAILABLE MONGODB PRODUCTS:
+
+${JSON.stringify(compactProducts)}
+
+TASK:
+
+Select the best products for the cart.
+
+IMPORTANT RULES:
+
+1. Select ONLY products from AVAILABLE MONGODB PRODUCTS.
+
+2. NEVER invent a product.
+
+3. NEVER invent a productId.
+
+4. NEVER invent a SKU.
+
+5. A productId in the answer MUST exactly match
+   one of the supplied productId values.
+
+6. Prefer affordable products.
+
+7. Prefer products with long shelf life.
+
+8. Prefer products that do not require refrigeration.
+
+9. Prefer products suitable for a small cart.
+
+10. If cost is greater than MRP, normally avoid that product.
+
+11. Consider likely demand from the area.
+
+12. Consider limited starting capital.
+
+13. Consider fast-moving potential.
+
+Return ONLY JSON.
+
+Use exactly this structure:
+
+{
+  "recommendations": [
+    {
+      "productId": "EXACT_PRODUCT_ID_FROM_LIST",
+      "priority": "very_high",
+      "suggestedInitialQuantity": 5,
+      "reason": "short reason"
+    }
+  ],
+  "productsToAvoidOrLimit": [
+    {
+      "productId": "EXACT_PRODUCT_ID_FROM_LIST",
+      "reason": "short reason"
+    }
+  ],
+  "summary": "short summary"
+}
+
+Rules:
+
+- recommendations: 8 to 12 products
+- productsToAvoidOrLimit: 3 to 5 products
+- suggestedInitialQuantity must be a positive integer
+- priority must be one of:
+  very_high
+  high
+  medium
+  low
+
+Return JSON only.
+Do not use markdown.
+Do not add text outside JSON.
+`;
+
+  /*
+  --------------------------------------------------------
+  Call Groq
+  --------------------------------------------------------
+  */
+
+  const response = await groq.chat.completions.create({
+    model: "openai/gpt-oss-20b",
+
+    messages: [
+      {
+        role: "system",
+        content: `
+You are a strict JSON-producing retail inventory advisor.
+
+You MUST follow the requested JSON structure.
+
+You MUST select products only from the supplied list.
+
+Never invent IDs.
+
+Never invent products.
+
+Return JSON only.
+`,
+      },
+      {
+        role: "user",
+        content: prompt,
+      },
+    ],
+
+    response_format: {
+      type: "json_object",
+    },
+
+    include_reasoning: false,
+  });
+
+  const content = response.choices[0].message.content;
+
+  console.log("");
+  console.log("FINAL AI RAW RESPONSE:");
+  console.log(content);
+
+  /*
+  --------------------------------------------------------
+  Parse JSON
+  --------------------------------------------------------
+  */
+
+  let result;
+
+  try {
+    result = JSON.parse(content);
+  } catch (error) {
+    console.error("");
+    console.error("================================");
+    console.error("INVALID FINAL AI JSON");
+    console.error("================================");
+    console.error(content);
+    console.error("================================");
+
+    throw new Error(
+      "AI returned invalid final recommendation JSON"
+    );
+  }
+
+  /*
+  --------------------------------------------------------
+  Validate AI response structure
+  --------------------------------------------------------
+  */
+
+  if (
+    !result ||
+    !Array.isArray(result.recommendations)
+  ) {
+    throw new Error(
+      "AI response does not contain recommendations array"
+    );
+  }
+
+  if (
+    !Array.isArray(result.productsToAvoidOrLimit)
+  ) {
+    throw new Error(
+      "AI response does not contain productsToAvoidOrLimit array"
+    );
+  }
+
+  /*
+  --------------------------------------------------------
+  Build lookup table of REAL MongoDB products.
+  --------------------------------------------------------
+  */
+
+  const productMap = new Map();
+
+  for (const product of products) {
+    productMap.set(
+      String(product.productId),
+      product
+    );
+  }
+
+  /*
+  --------------------------------------------------------
+  Validate recommendations.
+
+  This is VERY important.
+
+  The AI cannot create fake products.
+  --------------------------------------------------------
+  */
+
+  const validRecommendations = [];
+
+  for (const recommendation of result.recommendations) {
+    const productId = String(
+      recommendation.productId || ""
+    );
+
+    const realProduct = productMap.get(productId);
+
+    if (!realProduct) {
+      console.warn(
+        `Ignoring AI-selected product not found in MongoDB: ${productId}`
+      );
+
+      continue;
+    }
+
+    validRecommendations.push({
+      productId: productId,
+
+      productName: realProduct.productName,
+
+      sku: realProduct.sku,
+
+      brand: realProduct.brand,
+
+      category: realProduct.category,
+
+      subCategory: realProduct.subCategory,
+
+      mrp: Number(realProduct.mrp || 0),
+
+      cost: Number(realProduct.cost || 0),
+
+      coldChainProduct: Boolean(
+        realProduct.coldChainProduct
+      ),
+
+      shelfLife: Number(
+        realProduct.shelfLife || 0
+      ),
+
+      priority:
+        recommendation.priority || "medium",
+
+      suggestedInitialQuantity:
+        Number(
+          recommendation.suggestedInitialQuantity || 1
+        ),
+
+      reason:
+        recommendation.reason ||
+        "Potentially suitable for this location.",
+    });
+  }
+
+  /*
+  --------------------------------------------------------
+  Validate products to avoid/limit.
+  --------------------------------------------------------
+  */
+
+  const validProductsToAvoidOrLimit = [];
+
+  for (
+    const recommendation of result.productsToAvoidOrLimit
+  ) {
+    const productId = String(
+      recommendation.productId || ""
+    );
+
+    const realProduct = productMap.get(productId);
+
+    if (!realProduct) {
+      console.warn(
+        `Ignoring invalid avoid product: ${productId}`
+      );
+
+      continue;
+    }
+
+    validProductsToAvoidOrLimit.push({
+      productId: productId,
+
+      productName: realProduct.productName,
+
+      sku: realProduct.sku,
+
+      brand: realProduct.brand,
+
+      category: realProduct.category,
+
+      subCategory: realProduct.subCategory,
+
+      mrp: Number(realProduct.mrp || 0),
+
+      cost: Number(realProduct.cost || 0),
+
+      reason:
+        recommendation.reason ||
+        "Limited priority for this location.",
+    });
+  }
+
+  /*
+  --------------------------------------------------------
+  Final result.
+  --------------------------------------------------------
+  */
+
+  return {
+    recommendations: validRecommendations,
+
+    productsToAvoidOrLimit:
+      validProductsToAvoidOrLimit,
+
+    summary:
+      result.summary ||
+      "Products selected based on location and product characteristics.",
+  };
+}
+
+
 module.exports = {
-  generateRecommendation,
+  generateProductDemand,
+  generateFinalRecommendation,
 };

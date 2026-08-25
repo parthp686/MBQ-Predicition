@@ -72,9 +72,9 @@ router.get("/analyze", async (req, res) => {
     console.log("AI CART RECOMMENDATION");
     console.log("================================");
 
-    if (result.recommendation) {
+    if (result.recommendations) {
       console.log(
-        JSON.stringify(result.recommendation, null, 2)
+        JSON.stringify(result.recommendations, null, 2)
       );
     } else {
       console.log("No AI recommendation returned.");
