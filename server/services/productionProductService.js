@@ -2,23 +2,42 @@ const { MongoClient } = require("mongodb");
 
 const uri = process.env.PRODUCTION_MONGODB_URI;
 
+if (!uri) {
+  throw new Error(
+    "PRODUCTION_MONGODB_URI is not defined in .env"
+  );
+}
+
 const client = new MongoClient(uri);
 
+let isConnected = false;
+
 async function connectProductionDB() {
-  if (!client.topology || client.topology.isDestroyed()) {
+  if (!isConnected) {
     await client.connect();
+    isConnected = true;
+
+    console.log("Production MongoDB connected.");
   }
 
   return client.db("rever_uat");
 }
 
-
 /**
  * Search real products from production MongoDB.
+ *
+ * AI gives us product TYPES such as:
+ * - Biscuits
+ * - Namkeen
+ * - Chocolates
+ * - Beverages
+ *
+ * This function converts those types into MongoDB
+ * search keywords and returns real products.
  */
 async function searchProductsByTypes(
   productTypes,
-  limit = 50
+  limit = 30
 ) {
   if (
     !Array.isArray(productTypes) ||
@@ -32,9 +51,9 @@ async function searchProductsByTypes(
   const productsCollection =
     db.collection("products");
 
-  /*
-   * Convert AI product types into searchable keywords.
-   */
+  // ==========================================
+  // AI PRODUCT TYPE → SEARCH KEYWORDS
+  // ==========================================
 
   const keywordMap = {
     "packaged water": [
@@ -50,11 +69,29 @@ async function searchProductsByTypes(
       "instant coffee",
     ],
 
+    tea: [
+      "tea",
+      "chai",
+    ],
+
+    coffee: [
+      "coffee",
+      "cold coffee",
+      "instant coffee",
+    ],
+
     biscuits: [
       "biscuit",
       "biscuits",
       "cookie",
       "cookies",
+    ],
+
+    snacks: [
+      "snack",
+      "snacks",
+      "chips",
+      "savory",
     ],
 
     namkeen: [
@@ -81,6 +118,21 @@ async function searchProductsByTypes(
       "drink",
     ],
 
+    juice: [
+      "juice",
+      "fruit drink",
+      "fruit juice",
+    ],
+
+    beverages: [
+      "beverage",
+      "beverages",
+      "drink",
+      "juice",
+      "coffee",
+      "tea",
+    ],
+
     chocolates: [
       "chocolate",
       "candy",
@@ -100,46 +152,52 @@ async function searchProductsByTypes(
     ],
   };
 
-
-  /*
-   * Build keywords from AI response.
-   */
+  // ==========================================
+  // BUILD SEARCH KEYWORDS
+  // ==========================================
 
   const keywords = [];
 
   for (const type of productTypes) {
-    const normalized =
-      String(type)
-        .trim()
-        .toLowerCase();
+    const normalized = String(type)
+      .trim()
+      .toLowerCase();
 
     if (keywordMap[normalized]) {
       keywords.push(
         ...keywordMap[normalized]
       );
     } else {
+      // If AI gives a new product type
+      // that is not in our keyword map,
+      // use that type directly.
       keywords.push(normalized);
     }
   }
 
-
-  /*
-   * Remove duplicate keywords.
-   */
-
+  // Remove duplicates
   const uniqueKeywords = [
     ...new Set(keywords),
   ];
 
+  console.log("");
 
-  /*
-   * Create MongoDB regex conditions.
-   */
+  console.log(
+    "MongoDB product search keywords:"
+  );
+
+  console.log(uniqueKeywords);
+
+  // ==========================================
+  // CREATE MONGODB SEARCH CONDITIONS
+  // ==========================================
 
   const regexConditions =
     uniqueKeywords.map((keyword) => {
-      const regex =
-        new RegExp(keyword, "i");
+      const regex = new RegExp(
+        escapeRegex(keyword),
+        "i"
+      );
 
       return {
         $or: [
@@ -159,18 +217,9 @@ async function searchProductsByTypes(
       };
     });
 
-
-  console.log("");
-  console.log(
-    "MongoDB product search keywords:"
-  );
-
-  console.log(uniqueKeywords);
-
-
-  /*
-   * Query production products.
-   */
+  // ==========================================
+  // QUERY PRODUCTION PRODUCTS
+  // ==========================================
 
   const products =
     await productsCollection
@@ -183,10 +232,13 @@ async function searchProductsByTypes(
       .limit(limit)
       .toArray();
 
+  console.log(
+    `Products returned from MongoDB: ${products.length}`
+  );
 
-  /*
-   * Return only fields needed by the AI.
-   */
+  // ==========================================
+  // RETURN ONLY USEFUL PRODUCT INFORMATION
+  // ==========================================
 
   return products.map((product) => ({
     productId:
@@ -235,6 +287,18 @@ async function searchProductsByTypes(
   }));
 }
 
+/**
+ * Escape special regex characters.
+ *
+ * This prevents a keyword from accidentally
+ * becoming a regex pattern.
+ */
+function escapeRegex(value) {
+  return value.replace(
+    /[.*+?^${}()|[\]\\]/g,
+    "\\$&"
+  );
+}
 
 module.exports = {
   searchProductsByTypes,

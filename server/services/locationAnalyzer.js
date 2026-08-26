@@ -8,13 +8,11 @@ const {
 
 const {
   generateProductDemand,
-  generateFinalRecommendation,
 } = require("./aiRecommendationService");
 
 const {
   searchProductsByTypes,
 } = require("./productionProductService");
-
 
 async function analyzeLocation(
   latitude,
@@ -47,7 +45,6 @@ async function analyzeLocation(
     `Nearby places found: ${places.length}`
   );
 
-
   // ==========================================
   // STEP 2
   // ANALYZE AREA
@@ -63,7 +60,6 @@ async function analyzeLocation(
   console.log(
     JSON.stringify(analysis, null, 2)
   );
-
 
   // ==========================================
   // STEP 3
@@ -82,9 +78,8 @@ async function analyzeLocation(
     areaAnalysis: analysis,
   };
 
-
   // ==========================================
-  // STEP 4
+  // STEP 3
   // AI DETERMINES PRODUCT TYPES
   // ==========================================
 
@@ -109,9 +104,8 @@ async function analyzeLocation(
     )
   );
 
-
   // ==========================================
-  // STEP 5
+  // STEP 4
   // QUERY PRODUCTION MONGODB
   // ==========================================
 
@@ -131,7 +125,6 @@ async function analyzeLocation(
 
   console.log(productTypes);
 
-
   const products =
     await searchProductsByTypes(
       productTypes,
@@ -144,46 +137,39 @@ async function analyzeLocation(
     `Real products found: ${products.length}`
   );
 
-
   // ==========================================
-  // STEP 6
-  // FINAL AI PRODUCT SELECTION
-  // ==========================================
-
-  console.log("");
-  console.log(
-    "STEP 5: AI selecting final products..."
-  );
-
-  const finalRecommendation =
-    await generateFinalRecommendation(
-      locationData,
-      productDemand,
-      products
-    );
-
-
-  // ==========================================
-  // PRINT FINAL RECOMMENDATIONS
+  // STEP 5
+  // DISPLAY REAL PRODUCTS
   // ==========================================
 
   console.log("");
   console.log("================================");
-  console.log("FINAL CART RECOMMENDATION");
+  console.log("PRODUCTION PRODUCTS");
   console.log("================================");
 
-  console.log(
-    JSON.stringify(
-      finalRecommendation,
-      null,
-      2
-    )
-  );
+  products.forEach((product, index) => {
+    console.log("");
+    console.log(`${index + 1}.`);
 
+    console.log({
+      productId: product.productId,
+      productName: product.productName,
+      sku: product.sku,
+      brand: product.brand,
+      category: product.category,
+      subCategory: product.subCategory,
+      mrp: product.mrp,
+      cost: product.cost,
+      coldChainProduct:
+        product.coldChainProduct,
+      shelfLife: product.shelfLife,
+    });
+  });
+
+  console.log("");
   console.log("================================");
   console.log("LOCATION ANALYSIS FINISHED");
   console.log("================================");
-
 
   // ==========================================
   // RETURN API RESULT
@@ -202,12 +188,9 @@ async function analyzeLocation(
 
     productDemand,
 
-    recommendations:
-      finalRecommendation,
-
+    recommendedProducts: products,
   };
 }
-
 
 module.exports = {
   analyzeLocation,

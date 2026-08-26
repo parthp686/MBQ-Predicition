@@ -170,12 +170,6 @@ async function generateFinalRecommendation(
   productDemand,
   products
 ) {
-  /*
-  Keep the candidate data small.
-
-  The AI does NOT need the complete MongoDB document.
-  */
-
   const compactProducts = products.map((product) => ({
     productId: String(product.productId),
     productName: product.productName,
@@ -195,103 +189,64 @@ async function generateFinalRecommendation(
     `Sending ${compactProducts.length} products to final AI`
   );
 
-  /*
-  IMPORTANT:
-
-  We don't ask the AI to reproduce all product information.
-
-  It only needs to return IDs and recommendation information.
-  */
-
   const prompt = `
-AREA ANALYSIS:
+You are a retail product selection advisor for a small mobile cart in India.
+
+The location has the following area characteristics:
 
 ${JSON.stringify(locationData.areaAnalysis)}
 
-PRODUCT DEMAND:
+The AI identified these likely product types:
 
 ${JSON.stringify(productDemand.productTypes)}
 
-AVAILABLE MONGODB PRODUCTS:
+Below is a list of REAL products from MongoDB.
 
+AVAILABLE PRODUCTS:
 ${JSON.stringify(compactProducts)}
 
-TASK:
+Your task:
 
-Select the best products for the cart.
+Select the best 8 to 12 products from the supplied list.
 
 IMPORTANT RULES:
 
-1. Select ONLY products from AVAILABLE MONGODB PRODUCTS.
-
+1. Select ONLY products from the supplied list.
 2. NEVER invent a product.
-
 3. NEVER invent a productId.
-
-4. NEVER invent a SKU.
-
-5. A productId in the answer MUST exactly match
-   one of the supplied productId values.
-
-6. Prefer affordable products.
-
-7. Prefer products with long shelf life.
-
-8. Prefer products that do not require refrigeration.
-
-9. Prefer products suitable for a small cart.
-
-10. If cost is greater than MRP, normally avoid that product.
-
-11. Consider likely demand from the area.
-
-12. Consider limited starting capital.
-
-13. Consider fast-moving potential.
+4. productId MUST exactly match one supplied productId.
+5. Prefer affordable products.
+6. Prefer products with long shelf life.
+7. Prefer products that do not require refrigeration.
+8. Prefer products suitable for a small cart.
+9. Prefer products with good margin potential.
+10. If cost is greater than MRP, normally avoid the product.
+11. Consider the location and customer segments.
+12. Consider fast-moving potential.
+13. Consider limited starting capital.
 
 Return ONLY JSON.
 
 Use exactly this structure:
 
 {
-  "recommendations": [
-    {
-      "productId": "EXACT_PRODUCT_ID_FROM_LIST",
-      "priority": "very_high",
-      "suggestedInitialQuantity": 5,
-      "reason": "short reason"
-    }
-  ],
-  "productsToAvoidOrLimit": [
-    {
-      "productId": "EXACT_PRODUCT_ID_FROM_LIST",
-      "reason": "short reason"
-    }
-  ],
-  "summary": "short summary"
+  "selectedProductIds": [
+    "productId"
+  ]
 }
 
 Rules:
 
-- recommendations: 8 to 12 products
-- productsToAvoidOrLimit: 3 to 5 products
-- suggestedInitialQuantity must be a positive integer
-- priority must be one of:
-  very_high
-  high
-  medium
-  low
-
-Return JSON only.
-Do not use markdown.
-Do not add text outside JSON.
+- Select between 8 and 12 products.
+- Every ID must exist in AVAILABLE PRODUCTS.
+- Do not return product names.
+- Do not return SKU.
+- Do not return prices.
+- Do not return reasons.
+- Do not return quantities.
+- Do not return markdown.
+- Do not return explanations.
 `;
-
-  /*
-  --------------------------------------------------------
-  Call Groq
-  --------------------------------------------------------
-  */
 
   const response = await groq.chat.completions.create({
     model: "openai/gpt-oss-20b",
@@ -300,17 +255,15 @@ Do not add text outside JSON.
       {
         role: "system",
         content: `
-You are a strict JSON-producing retail inventory advisor.
+You are a strict JSON product selector.
 
-You MUST follow the requested JSON structure.
+Return ONLY valid JSON.
 
-You MUST select products only from the supplied list.
+You may select ONLY product IDs that appear
+in the supplied MongoDB product list.
 
 Never invent IDs.
-
 Never invent products.
-
-Return JSON only.
 `,
       },
       {
@@ -332,12 +285,6 @@ Return JSON only.
   console.log("FINAL AI RAW RESPONSE:");
   console.log(content);
 
-  /*
-  --------------------------------------------------------
-  Parse JSON
-  --------------------------------------------------------
-  */
-
   let result;
 
   try {
@@ -355,34 +302,14 @@ Return JSON only.
     );
   }
 
-  /*
-  --------------------------------------------------------
-  Validate AI response structure
-  --------------------------------------------------------
-  */
-
   if (
     !result ||
-    !Array.isArray(result.recommendations)
+    !Array.isArray(result.selectedProductIds)
   ) {
     throw new Error(
-      "AI response does not contain recommendations array"
+      "AI response does not contain selectedProductIds"
     );
   }
-
-  if (
-    !Array.isArray(result.productsToAvoidOrLimit)
-  ) {
-    throw new Error(
-      "AI response does not contain productsToAvoidOrLimit array"
-    );
-  }
-
-  /*
-  --------------------------------------------------------
-  Build lookup table of REAL MongoDB products.
-  --------------------------------------------------------
-  */
 
   const productMap = new Map();
 
@@ -393,135 +320,79 @@ Return JSON only.
     );
   }
 
-  /*
-  --------------------------------------------------------
-  Validate recommendations.
-
-  This is VERY important.
-
-  The AI cannot create fake products.
-  --------------------------------------------------------
-  */
-
   const validRecommendations = [];
 
-  for (const recommendation of result.recommendations) {
-    const productId = String(
-      recommendation.productId || ""
-    );
+  for (const productId of result.selectedProductIds) {
+    const id = String(productId);
 
-    const realProduct = productMap.get(productId);
+    const realProduct = productMap.get(id);
 
     if (!realProduct) {
       console.warn(
-        `Ignoring AI-selected product not found in MongoDB: ${productId}`
+        `Ignoring invalid AI product ID: ${id}`
       );
 
       continue;
     }
 
     validRecommendations.push({
-      productId: productId,
+      productId: id,
 
-      productName: realProduct.productName,
+      productName:
+        realProduct.productName,
 
-      sku: realProduct.sku,
+      sku:
+        realProduct.sku,
 
-      brand: realProduct.brand,
+      brand:
+        realProduct.brand,
 
-      category: realProduct.category,
+      category:
+        realProduct.category,
 
-      subCategory: realProduct.subCategory,
+      subCategory:
+        realProduct.subCategory,
 
-      mrp: Number(realProduct.mrp || 0),
+      mrp:
+        Number(realProduct.mrp || 0),
 
-      cost: Number(realProduct.cost || 0),
+      cost:
+        Number(realProduct.cost || 0),
 
-      coldChainProduct: Boolean(
-        realProduct.coldChainProduct
-      ),
-
-      shelfLife: Number(
-        realProduct.shelfLife || 0
-      ),
-
-      priority:
-        recommendation.priority || "medium",
-
-      suggestedInitialQuantity:
-        Number(
-          recommendation.suggestedInitialQuantity || 1
+      coldChainProduct:
+        Boolean(
+          realProduct.coldChainProduct
         ),
 
-      reason:
-        recommendation.reason ||
-        "Potentially suitable for this location.",
+      shelfLife:
+        Number(
+          realProduct.shelfLife || 0
+        ),
     });
   }
 
-  /*
-  --------------------------------------------------------
-  Validate products to avoid/limit.
-  --------------------------------------------------------
-  */
+  console.log("");
+  console.log("================================");
+  console.log("FINAL SELECTED PRODUCTS");
+  console.log("================================");
 
-  const validProductsToAvoidOrLimit = [];
-
-  for (
-    const recommendation of result.productsToAvoidOrLimit
-  ) {
-    const productId = String(
-      recommendation.productId || ""
-    );
-
-    const realProduct = productMap.get(productId);
-
-    if (!realProduct) {
-      console.warn(
-        `Ignoring invalid avoid product: ${productId}`
-      );
-
-      continue;
-    }
-
-    validProductsToAvoidOrLimit.push({
-      productId: productId,
-
-      productName: realProduct.productName,
-
-      sku: realProduct.sku,
-
-      brand: realProduct.brand,
-
-      category: realProduct.category,
-
-      subCategory: realProduct.subCategory,
-
-      mrp: Number(realProduct.mrp || 0),
-
-      cost: Number(realProduct.cost || 0),
-
-      reason:
-        recommendation.reason ||
-        "Limited priority for this location.",
-    });
-  }
-
-  /*
-  --------------------------------------------------------
-  Final result.
-  --------------------------------------------------------
-  */
+  console.log(
+    JSON.stringify(
+      validRecommendations,
+      null,
+      2
+    )
+  );
 
   return {
-    recommendations: validRecommendations,
+    recommendations:
+      validRecommendations,
 
-    productsToAvoidOrLimit:
-      validProductsToAvoidOrLimit,
+    selectedCount:
+      validRecommendations.length,
 
     summary:
-      result.summary ||
-      "Products selected based on location and product characteristics.",
+      "Products selected from the production MongoDB based on location demand and cart suitability.",
   };
 }
 
