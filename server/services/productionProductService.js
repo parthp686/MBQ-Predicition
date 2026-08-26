@@ -2,22 +2,11 @@ const { MongoClient } = require("mongodb");
 
 const uri = process.env.PRODUCTION_MONGODB_URI;
 
-if (!uri) {
-  throw new Error(
-    "PRODUCTION_MONGODB_URI is not defined in .env"
-  );
-}
-
 const client = new MongoClient(uri);
 
-let isConnected = false;
-
 async function connectProductionDB() {
-  if (!isConnected) {
+  if (!client.topology || client.topology.isDestroyed()) {
     await client.connect();
-    isConnected = true;
-
-    console.log("Production MongoDB connected.");
   }
 
   return client.db("rever_uat");
@@ -26,34 +15,18 @@ async function connectProductionDB() {
 /**
  * Search real products from production MongoDB.
  *
- * AI gives us product TYPES such as:
- * - Biscuits
- * - Namkeen
- * - Chocolates
- * - Beverages
- *
- * This function converts those types into MongoDB
- * search keywords and returns real products.
+ * IMPORTANT:
+ * This function returns CANDIDATES.
+ * It does NOT decide the final store assortment.
  */
-async function searchProductsByTypes(
-  productTypes,
-  limit = 30
-) {
-  if (
-    !Array.isArray(productTypes) ||
-    productTypes.length === 0
-  ) {
+async function searchProductsByTypes(productTypes, limit = 150) {
+  if (!Array.isArray(productTypes) || productTypes.length === 0) {
     return [];
   }
 
   const db = await connectProductionDB();
 
-  const productsCollection =
-    db.collection("products");
-
-  // ==========================================
-  // AI PRODUCT TYPE → SEARCH KEYWORDS
-  // ==========================================
+  const productsCollection = db.collection("products");
 
   const keywordMap = {
     "packaged water": [
@@ -69,29 +42,11 @@ async function searchProductsByTypes(
       "instant coffee",
     ],
 
-    tea: [
-      "tea",
-      "chai",
-    ],
-
-    coffee: [
-      "coffee",
-      "cold coffee",
-      "instant coffee",
-    ],
-
     biscuits: [
       "biscuit",
       "biscuits",
       "cookie",
       "cookies",
-    ],
-
-    snacks: [
-      "snack",
-      "snacks",
-      "chips",
-      "savory",
     ],
 
     namkeen: [
@@ -101,6 +56,15 @@ async function searchProductsByTypes(
       "bhujia",
       "chips",
       "savory",
+    ],
+
+    snacks: [
+      "snack",
+      "chips",
+      "namkeen",
+      "mixture",
+      "sev",
+      "bhujia",
     ],
 
     "mouth fresheners": [
@@ -126,9 +90,9 @@ async function searchProductsByTypes(
 
     beverages: [
       "beverage",
-      "beverages",
       "drink",
       "juice",
+      "water",
       "coffee",
       "tea",
     ],
@@ -152,10 +116,6 @@ async function searchProductsByTypes(
     ],
   };
 
-  // ==========================================
-  // BUILD SEARCH KEYWORDS
-  // ==========================================
-
   const keywords = [];
 
   for (const type of productTypes) {
@@ -164,140 +124,106 @@ async function searchProductsByTypes(
       .toLowerCase();
 
     if (keywordMap[normalized]) {
-      keywords.push(
-        ...keywordMap[normalized]
-      );
+      keywords.push(...keywordMap[normalized]);
     } else {
-      // If AI gives a new product type
-      // that is not in our keyword map,
-      // use that type directly.
       keywords.push(normalized);
     }
   }
 
-  // Remove duplicates
-  const uniqueKeywords = [
-    ...new Set(keywords),
-  ];
+  const uniqueKeywords = [...new Set(keywords)];
 
   console.log("");
+  console.log("--------------------------------");
+  console.log("PRODUCTION PRODUCT SEARCH");
+  console.log("--------------------------------");
+  console.log("Requested product types:");
+  console.log(productTypes);
 
-  console.log(
-    "MongoDB product search keywords:"
-  );
-
+  console.log("");
+  console.log("Search keywords:");
   console.log(uniqueKeywords);
 
-  // ==========================================
-  // CREATE MONGODB SEARCH CONDITIONS
-  // ==========================================
+  /**
+   * Build MongoDB search conditions.
+   */
+  const regexConditions = uniqueKeywords.map((keyword) => {
+    const escapedKeyword = keyword.replace(
+      /[.*+?^${}()|[\]\\]/g,
+      "\\$&"
+    );
 
-  const regexConditions =
-    uniqueKeywords.map((keyword) => {
-      const regex = new RegExp(
-        escapeRegex(keyword),
-        "i"
-      );
+    const regex = new RegExp(escapedKeyword, "i");
 
-      return {
-        $or: [
-          {
-            modelName: regex,
-          },
-          {
-            "category.name": regex,
-          },
-          {
-            "subCategory.name": regex,
-          },
-          {
-            "brand.name": regex,
-          },
-        ],
-      };
-    });
+    return {
+      $or: [
+        {
+          modelName: regex,
+        },
+        {
+          "category.name": regex,
+        },
+        {
+          "subCategory.name": regex,
+        },
+        {
+          "brand.name": regex,
+        },
+      ],
+    };
+  });
 
-  // ==========================================
-  // QUERY PRODUCTION PRODUCTS
-  // ==========================================
+  /**
+   * Only active/enabled production products.
+   */
+  const products = await productsCollection
+    .find({
+      isActive: true,
+      isEnabled: true,
+      $or: regexConditions,
+    })
+    .limit(limit)
+    .toArray();
 
-  const products =
-    await productsCollection
-      .find({
-        isActive: true,
-        isEnabled: true,
+  console.log("");
+  console.log(`Candidate products found: ${products.length}`);
 
-        $or: regexConditions,
-      })
-      .limit(limit)
-      .toArray();
-
-  console.log(
-    `Products returned from MongoDB: ${products.length}`
-  );
-
-  // ==========================================
-  // RETURN ONLY USEFUL PRODUCT INFORMATION
-  // ==========================================
-
+  /**
+   * Return only the fields required by the
+   * assortment/ranking layer.
+   */
   return products.map((product) => ({
-    productId:
-      product._id.toString(),
+    productId: product._id.toString(),
 
-    productName:
-      product.modelName || "",
+    productName: product.modelName || "",
 
-    sku:
-      product.productSku || "",
+    sku: product.productSku || "",
 
-    brand:
-      product.brand?.name || "",
+    brand: product.brand?.name || "",
 
-    category:
-      product.category?.name || "",
+    category: product.category?.name || "",
 
-    subCategory:
-      product.subCategory?.name || "",
+    subCategory: product.subCategory?.name || "",
 
-    mrp:
-      Number(product.mrp || 0),
+    mrp: Number(product.mrp || 0),
 
-    cost:
-      Number(
-        product.cost ||
-        product.netRate ||
-        0
-      ),
+    cost: Number(
+      product.cost ||
+      product.netRate ||
+      0
+    ),
 
-    coldChainProduct:
-      Boolean(
-        product.coldChainProduct
-      ),
+    coldChainProduct: Boolean(
+      product.coldChainProduct
+    ),
 
-    shelfLife:
-      Number(
-        product.shelfLife || 0
-      ),
+    shelfLife: Number(
+      product.shelfLife || 0
+    ),
 
-    isActive:
-      Boolean(product.isActive),
+    isActive: Boolean(product.isActive),
 
-    isEnabled:
-      Boolean(product.isEnabled),
+    isEnabled: Boolean(product.isEnabled),
   }));
-}
-
-/**
- * Escape special regex characters.
- *
- * This prevents a keyword from accidentally
- * becoming a regex pattern.
- */
-function escapeRegex(value) {
-  return value.replace(
-    /[.*+?^${}()|[\]\\]/g,
-    "\\$&"
-  );
 }
 
 module.exports = {

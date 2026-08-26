@@ -14,11 +14,17 @@ const {
   searchProductsByTypes,
 } = require("./productionProductService");
 
+const {
+  buildInitialStoreAssortment,
+} = require("./storeAssortmentService");
+
+
 async function analyzeLocation(
   latitude,
   longitude,
   radius = 1000
 ) {
+
   console.log("================================");
   console.log("LOCATION ANALYSIS STARTED");
   console.log("================================");
@@ -26,6 +32,7 @@ async function analyzeLocation(
   console.log(`Latitude: ${latitude}`);
   console.log(`Longitude: ${longitude}`);
   console.log(`Radius: ${radius}m`);
+
 
   // ==========================================
   // STEP 1
@@ -45,6 +52,7 @@ async function analyzeLocation(
     `Nearby places found: ${places.length}`
   );
 
+
   // ==========================================
   // STEP 2
   // ANALYZE AREA
@@ -58,8 +66,13 @@ async function analyzeLocation(
   console.log("Area analysis:");
 
   console.log(
-    JSON.stringify(analysis, null, 2)
+    JSON.stringify(
+      analysis,
+      null,
+      2
+    )
   );
+
 
   // ==========================================
   // STEP 3
@@ -67,6 +80,7 @@ async function analyzeLocation(
   // ==========================================
 
   const locationData = {
+
     location: {
       latitude: Number(latitude),
       longitude: Number(longitude),
@@ -76,7 +90,9 @@ async function analyzeLocation(
     nearbyPlacesCount: places.length,
 
     areaAnalysis: analysis,
+
   };
+
 
   // ==========================================
   // STEP 3
@@ -104,6 +120,7 @@ async function analyzeLocation(
     )
   );
 
+
   // ==========================================
   // STEP 4
   // QUERY PRODUCTION MONGODB
@@ -125,71 +142,82 @@ async function analyzeLocation(
 
   console.log(productTypes);
 
+
+  // IMPORTANT:
+  // We get a large candidate pool here.
+  //
+  // These are NOT the final recommendations.
+  //
+  // They are candidates that our backend
+  // will filter and rank.
+
   const products =
     await searchProductsByTypes(
       productTypes,
-      30
+      150
     );
+
 
   console.log("");
 
   console.log(
-    `Real products found: ${products.length}`
+    `Candidate products found: ${products.length}`
   );
 
-  // ==========================================
-  // STEP 5
-  // DISPLAY REAL PRODUCTS
-  // ==========================================
 
-  console.log("");
-  console.log("================================");
-  console.log("PRODUCTION PRODUCTS");
-  console.log("================================");
+// ==========================================
+// STEP 5
+// BUILD INITIAL STORE ASSORTMENT
+// ==========================================
 
-  products.forEach((product, index) => {
-    console.log("");
-    console.log(`${index + 1}.`);
+console.log("");
+console.log("STEP 5: Building initial store assortment...");
 
-    console.log({
-      productId: product.productId,
-      productName: product.productName,
-      sku: product.sku,
-      brand: product.brand,
-      category: product.category,
-      subCategory: product.subCategory,
-      mrp: product.mrp,
-      cost: product.cost,
-      coldChainProduct:
-        product.coldChainProduct,
-      shelfLife: product.shelfLife,
-    });
-  });
+const finalProducts = buildInitialStoreAssortment(
+  products,
+  productDemand,
+  50
+);
 
-  console.log("");
-  console.log("================================");
-  console.log("LOCATION ANALYSIS FINISHED");
-  console.log("================================");
+console.log("");
+console.log("================================");
+console.log("FINAL CART RECOMMENDATION");
+console.log("================================");
 
-  // ==========================================
-  // RETURN API RESULT
-  // ==========================================
+console.log(
+  JSON.stringify(finalProducts, null, 2)
+);
+console.log(
+  `Recommended store products: ${finalProducts.length}`
+);
 
-  return {
-    location: {
-      latitude: Number(latitude),
-      longitude: Number(longitude),
-      radiusMeters: Number(radius),
-    },
+console.log("================================");
+console.log("LOCATION ANALYSIS FINISHED");
+console.log("================================");
 
-    nearbyPlacesCount: places.length,
+// ==========================================
+// RETURN API RESULT
+// ==========================================
 
-    areaAnalysis: analysis,
+return {
+  location: {
+    latitude: Number(latitude),
+    longitude: Number(longitude),
+    radiusMeters: Number(radius),
+  },
 
-    productDemand,
+  nearbyPlacesCount: places.length,
 
-    recommendedProducts: products,
-  };
+  areaAnalysis: analysis,
+
+  productDemand,
+
+  candidateProductCount: products.length,
+
+  recommendedProductCount: finalProducts.length,
+
+  recommendedProducts: finalProducts,
+};
 }
 
 module.exports = {
