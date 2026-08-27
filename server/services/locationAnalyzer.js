@@ -154,7 +154,7 @@ async function analyzeLocation(
   const products =
     await searchProductsByTypes(
       productTypes,
-      150
+      200
     );
 
 
@@ -173,11 +173,13 @@ async function analyzeLocation(
 console.log("");
 console.log("STEP 5: Building initial store assortment...");
 
-const finalProducts = buildInitialStoreAssortment(
-  products,
-  productDemand,
-  50
-);
+const finalProducts =
+  buildInitialStoreAssortment(
+    products,
+    productDemand,
+    100,
+    analysis
+  );
 
 console.log("");
 console.log("================================");
@@ -200,7 +202,7 @@ console.log("================================");
 // ==========================================
 
 return {
-  location: {
+  location: {   
     latitude: Number(latitude),
     longitude: Number(longitude),
     radiusMeters: Number(radius),

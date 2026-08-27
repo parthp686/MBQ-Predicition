@@ -1,83 +1,502 @@
 /**
  * Build the initial store assortment.
  *
- * MongoDB gives us the real products.
- * This service decides which products are
- * practical for the initial store.
+ * MongoDB gives us real products.
+ * AI tells us what product TYPES are likely to
+ * perform well in the location.
  *
- * No AI call is required here.
+ * Node.js decides which actual products should
+ * enter the initial store.
+ *
+ * No second AI call is required.
  */
 
 /**
- * Calculate a product score.
+ * Convert AI priority into a numeric score.
  */
-function calculateProductScore(product) {
-  let score = 0;
+function getDemandPriorityScore(priority) {
+  switch (String(priority || "").toLowerCase()) {
+    case "very_high":
+      return 40;
 
-  const mrp = Number(product.mrp || 0);
-  const cost = Number(product.cost || 0);
-  const shelfLife = Number(product.shelfLife || 0);
+    case "high":
+      return 30;
+
+    case "medium":
+      return 20;
+
+    case "low":
+      return 10;
+
+    default:
+      return 0;
+  }
+}
+
+/**
+ * Determine the area's price sensitivity.
+ *
+ * This is intentionally based on the area characteristics
+ * already calculated by analyzeService.js.
+ *
+ * We are NOT claiming to know the actual income of people
+ * in the area.
+ *
+ * This is only a purchasing/price-sensitivity estimate.
+ */
+function determinePriceSensitivity(areaAnalysis = {}) {
+  const hospitals = Number(areaAnalysis.hospitals || 0);
+  const clinics = Number(areaAnalysis.clinics || 0);
+  const pharmacies = Number(areaAnalysis.pharmacies || 0);
+
+  const schools = Number(areaAnalysis.schools || 0);
+  const colleges = Number(areaAnalysis.colleges || 0);
+  const universities = Number(
+    areaAnalysis.universities || 0
+  );
+
+  const offices = Number(areaAnalysis.offices || 0);
+
+  const hotels = Number(areaAnalysis.hotels || 0);
+  const restaurants = Number(
+    areaAnalysis.restaurants || 0
+  );
+  const cafes = Number(areaAnalysis.cafes || 0);
+
+  const supermarkets = Number(
+    areaAnalysis.supermarkets || 0
+  );
+
+  const busStops = Number(areaAnalysis.busStops || 0);
 
   /**
-   * Product must have a valid price.
+   * Value-oriented locations:
+   *
+   * Hospitals, clinics, pharmacies, students and
+   * commuters generally support a strong affordable
+   * impulse-purchase mix.
    */
-  if (mrp > 0) {
-    score += 10;
+  const valueScore =
+    hospitals * 2 +
+    clinics +
+    pharmacies +
+    schools * 2 +
+    colleges * 2 +
+    universities * 2 +
+    busStops * 2;
+
+  /**
+   * Higher-price-capacity signals:
+   *
+   * Offices, hotels, restaurants, cafes and supermarkets
+   * can support some higher-priced products.
+   *
+   * These are only signals, not proof of income.
+   */
+  const premiumScore =
+    offices * 2 +
+    hotels * 3 +
+    restaurants * 2 +
+    cafes * 2 +
+    supermarkets * 2;
+
+  /**
+   * Decide price sensitivity.
+   */
+  const difference = valueScore - premiumScore;
+
+  if (difference >= 25) {
+    return "high";
   }
 
-  /**
-   * Margin.
-   */
-  if (mrp > 0 && cost > 0) {
-    const margin = ((mrp - cost) / mrp) * 100;
+  if (difference >= 10) {
+    return "medium_high";
+  }
 
-    if (margin >= 30) {
-      score += 30;
-    } else if (margin >= 20) {
-      score += 20;
-    } else if (margin >= 10) {
-      score += 10;
-    } else if (margin < 0) {
-      score -= 40;
+  if (difference <= -20) {
+    return "low";
+  }
+
+  if (difference <= -5) {
+    return "medium_low";
+  }
+
+  return "medium";
+}
+
+/**
+ * Price score.
+ *
+ * The same product gets a different score depending
+ * on the location's estimated price sensitivity.
+ */
+function calculatePriceScore(
+  product,
+  priceSensitivity
+) {
+  const mrp = Number(product.mrp || 0);
+
+  if (mrp <= 0) {
+    return -20;
+  }
+
+  switch (priceSensitivity) {
+    /**
+     * Strong preference for affordable products.
+     */
+    case "high":
+      if (mrp <= 10) return 25;
+      if (mrp <= 20) return 22;
+      if (mrp <= 30) return 16;
+      if (mrp <= 50) return 10;
+      if (mrp <= 100) return 2;
+
+      return -10;
+
+    /**
+     * Slight preference for affordable products.
+     */
+    case "medium_high":
+      if (mrp <= 10) return 20;
+      if (mrp <= 20) return 20;
+      if (mrp <= 30) return 18;
+      if (mrp <= 50) return 14;
+      if (mrp <= 100) return 6;
+
+      return 0;
+
+    /**
+     * Balanced price mix.
+     */
+    case "medium":
+      if (mrp <= 10) return 15;
+      if (mrp <= 20) return 18;
+      if (mrp <= 30) return 18;
+      if (mrp <= 50) return 18;
+      if (mrp <= 100) return 10;
+
+      return 3;
+
+    /**
+     * Slightly more room for expensive products.
+     */
+    case "medium_low":
+      if (mrp <= 10) return 10;
+      if (mrp <= 20) return 14;
+      if (mrp <= 30) return 18;
+      if (mrp <= 50) return 20;
+      if (mrp <= 100) return 18;
+
+      return 8;
+
+    /**
+     * More premium-oriented mix.
+     */
+    case "low":
+      if (mrp <= 10) return 5;
+      if (mrp <= 20) return 8;
+      if (mrp <= 30) return 14;
+      if (mrp <= 50) return 20;
+      if (mrp <= 100) return 25;
+
+      return 20;
+
+    default:
+      return 10;
+  }
+}
+
+/**
+ * Calculate margin score.
+ */
+function calculateMarginScore(product) {
+  const mrp = Number(product.mrp || 0);
+  const cost = Number(product.cost || 0);
+
+  if (mrp <= 0 || cost <= 0) {
+    return 0;
+  }
+
+  const margin =
+    ((mrp - cost) / mrp) * 100;
+
+  if (margin >= 40) {
+    return 35;
+  }
+
+  if (margin >= 30) {
+    return 30;
+  }
+
+  if (margin >= 20) {
+    return 20;
+  }
+
+  if (margin >= 10) {
+    return 10;
+  }
+
+  if (margin >= 0) {
+    return 3;
+  }
+
+  return -40;
+}
+
+/**
+ * Calculate shelf-life score.
+ */
+function calculateShelfLifeScore(product) {
+  const shelfLife = Number(
+    product.shelfLife || 0
+  );
+
+  if (shelfLife >= 365) {
+    return 20;
+  }
+
+  if (shelfLife >= 180) {
+    return 15;
+  }
+
+  if (shelfLife >= 90) {
+    return 10;
+  }
+
+  if (shelfLife >= 30) {
+    return 5;
+  }
+
+  if (shelfLife > 0) {
+    return -10;
+  }
+
+  return 0;
+}
+
+/**
+ * Calculate cold-chain score.
+ */
+function calculateColdChainScore(product) {
+  if (product.coldChainProduct) {
+    return -30;
+  }
+
+  return 10;
+}
+
+/**
+ * Get the product type/category represented by a product.
+ *
+ * We use MongoDB's category and subCategory fields
+ * because these are actual database fields.
+ */
+function getProductCategory(product) {
+  return (
+    product.category ||
+    product.subCategory ||
+    "Other"
+  )
+    .toString()
+    .trim()
+    .toLowerCase();
+}
+
+/**
+ * Determine how well a real MongoDB product matches
+ * one of the product types identified by AI.
+ *
+ * Example:
+ *
+ * AI says:
+ *   Biscuits
+ *
+ * MongoDB product:
+ *   Parle Hide & Seek
+ *
+ * category/subCategory:
+ *   Biscuits
+ *
+ * → strong match.
+ */
+function calculateDemandMatchScore(
+  product,
+  productDemand
+) {
+  const productTypes =
+    productDemand?.productTypes;
+
+  if (!Array.isArray(productTypes)) {
+    return 0;
+  }
+
+  const productText = [
+    product.productName,
+    product.brand,
+    product.category,
+    product.subCategory,
+  ]
+    .filter(Boolean)
+    .join(" ")
+    .toLowerCase();
+
+  let bestScore = 0;
+
+  for (const demand of productTypes) {
+    const type = String(
+      demand?.type || ""
+    )
+      .trim()
+      .toLowerCase();
+
+    if (!type) {
+      continue;
+    }
+
+    const priorityScore =
+      getDemandPriorityScore(
+        demand.priority
+      );
+
+    /**
+     * Direct text match.
+     */
+    if (productText.includes(type)) {
+      bestScore = Math.max(
+        bestScore,
+        priorityScore
+      );
+
+      continue;
+    }
+
+    /**
+     * Basic aliases.
+     */
+    const aliases = {
+      biscuit: [
+        "biscuit",
+        "biscuits",
+        "cookie",
+        "cookies",
+      ],
+
+      biscuits: [
+        "biscuit",
+        "biscuits",
+        "cookie",
+        "cookies",
+      ],
+
+      tea: [
+        "tea",
+        "chai",
+      ],
+
+      coffee: [
+        "coffee",
+      ],
+
+      namkeen: [
+        "namkeen",
+        "sev",
+        "bhujia",
+        "mixture",
+        "chips",
+      ],
+
+      chocolates: [
+        "chocolate",
+        "candy",
+        "confectionery",
+        "munch",
+        "kitkat",
+        "milkybar",
+      ],
+
+      juice: [
+        "juice",
+        "fruit drink",
+        "fruit juice",
+      ],
+
+      "packaged water": [
+        "water",
+        "mineral water",
+        "drinking water",
+      ],
+
+      "mouth fresheners": [
+        "mouth fresh",
+        "mouth freshener",
+        "mint",
+        "mukhwas",
+        "gum",
+      ],
+
+      "soft drinks": [
+        "soft drink",
+        "soft drinks",
+        "cola",
+        "soda",
+      ],
+    };
+
+    const typeAliases =
+      aliases[type] || [];
+
+    const matched =
+      typeAliases.some((alias) =>
+        productText.includes(alias)
+      );
+
+    if (matched) {
+      bestScore = Math.max(
+        bestScore,
+        priorityScore
+      );
     }
   }
 
-  /**
-   * Affordable products are useful
-   * for impulse purchases.
-   */
-  if (mrp <= 20) {
-    score += 20;
-  } else if (mrp <= 50) {
-    score += 15;
-  } else if (mrp <= 100) {
-    score += 8;
-  }
+  return bestScore;
+}
 
-  /**
-   * Shelf life.
-   */
-  if (shelfLife >= 180) {
-    score += 15;
-  } else if (shelfLife >= 90) {
-    score += 10;
-  } else if (shelfLife >= 30) {
-    score += 5;
-  } else if (shelfLife > 0 && shelfLife < 30) {
-    score -= 10;
-  }
+/**
+ * Calculate total product score.
+ */
+function calculateProductScore(
+  product,
+  productDemand,
+  priceSensitivity
+) {
+  const demandScore =
+    calculateDemandMatchScore(
+      product,
+      productDemand
+    );
 
-  /**
-   * Small cart preference:
-   * avoid cold-chain products.
-   */
-  if (product.coldChainProduct) {
-    score -= 30;
-  } else {
-    score += 10;
-  }
+  const priceScore =
+    calculatePriceScore(
+      product,
+      priceSensitivity
+    );
 
-  return score;
+  const marginScore =
+    calculateMarginScore(product);
+
+  const shelfLifeScore =
+    calculateShelfLifeScore(product);
+
+  const coldChainScore =
+    calculateColdChainScore(product);
+
+  return (
+    demandScore +
+    priceScore +
+    marginScore +
+    shelfLifeScore +
+    coldChainScore
+  );
 }
 
 /**
@@ -109,24 +528,29 @@ function filterProducts(products) {
       return false;
     }
 
-    /**
-     * Don't recommend products where
-     * procurement cost is higher than MRP.
-     */
-    const mrp = Number(product.mrp || 0);
-    const cost = Number(product.cost || 0);
+    const mrp = Number(
+      product.mrp || 0
+    );
+
+    const cost = Number(
+      product.cost || 0
+    );
 
     if (mrp <= 0) {
       return false;
     }
 
+    /**
+     * Don't recommend products where
+     * procurement cost is higher than MRP.
+     */
     if (cost > mrp) {
       return false;
     }
 
     /**
      * Avoid refrigerated products for
-     * the initial cart assortment.
+     * the initial store.
      */
     if (product.coldChainProduct) {
       return false;
@@ -137,20 +561,13 @@ function filterProducts(products) {
 }
 
 /**
- * Build a balanced assortment.
- *
- * Example:
- *
- * Biscuits       → several products
- * Chocolates     → several products
- * Namkeen        → several products
- * Beverages      → several products
- * etc.
+ * Build the final initial store assortment.
  */
 function buildInitialStoreAssortment(
   products,
   productDemand,
-  targetCount = 50
+  targetCount = 100,
+  areaAnalysis = {}
 ) {
   if (!Array.isArray(products)) {
     return [];
@@ -158,64 +575,129 @@ function buildInitialStoreAssortment(
 
   /**
    * STEP 1
-   * Filter invalid products.
+   *
+   * Determine price sensitivity.
    */
-  const validProducts = filterProducts(products);
+  const priceSensitivity =
+    determinePriceSensitivity(
+      areaAnalysis
+    );
 
   console.log("");
-  console.log("--------------------------------");
-  console.log("STORE ASSORTMENT");
-  console.log("--------------------------------");
+
+  console.log(
+    "--------------------------------"
+  );
+
+  console.log(
+    "STORE ASSORTMENT"
+  );
+
+  console.log(
+    "--------------------------------"
+  );
 
   console.log(
     `Candidates received: ${products.length}`
   );
 
   console.log(
-    `Valid candidates: ${validProducts.length}`
+    `Price sensitivity: ${priceSensitivity}`
   );
 
   /**
    * STEP 2
-   * Score every product.
+   *
+   * Filter invalid products.
    */
-  const scoredProducts = validProducts.map(
-    (product) => ({
-      ...product,
-      score: calculateProductScore(product),
-    })
+  const validProducts =
+    filterProducts(products);
+
+  console.log(
+    `Valid candidates: ${validProducts.length}`
   );
 
   /**
    * STEP 3
+   *
+   * Score products.
+   */
+  const scoredProducts =
+    validProducts.map(
+      (product) => ({
+        ...product,
+
+        score:
+          calculateProductScore(
+            product,
+            productDemand,
+            priceSensitivity
+          ),
+      })
+    );
+
+  /**
+   * STEP 4
+   *
+   * Remove products that don't match
+   * any AI-requested product type.
+   *
+   * This prevents unrelated products
+   * from entering the store.
+   */
+  const demandMatchedProducts =
+    scoredProducts.filter(
+      (product) =>
+        calculateDemandMatchScore(
+          product,
+          productDemand
+        ) > 0
+    );
+
+  console.log(
+    `Demand-matched candidates: ${demandMatchedProducts.length}`
+  );
+
+  /**
+   * If demand matching is too restrictive,
+   * fall back to all valid products.
+   *
+   * This prevents an empty store when
+   * MongoDB categories don't perfectly
+   * match our aliases.
+   */
+  const candidates =
+    demandMatchedProducts.length >=
+    Math.min(targetCount, 20)
+      ? demandMatchedProducts
+      : scoredProducts;
+
+  /**
+   * STEP 5
+   *
    * Highest score first.
    */
-  scoredProducts.sort(
+  candidates.sort(
     (a, b) => b.score - a.score
   );
 
   /**
-   * STEP 4
-   * Keep category diversity.
+   * STEP 6
    *
-   * We don't want the final store to become:
-   *
-   * 40 chocolates
-   * 5 biscuits
-   *
-   * Instead, distribute products across
-   * available categories.
+   * Group by category.
    */
-  const categoryGroups = new Map();
+  const categoryGroups =
+    new Map();
 
-  for (const product of scoredProducts) {
+  for (const product of candidates) {
     const category =
-      product.category ||
-      product.subCategory ||
-      "Other";
+      getProductCategory(product);
 
     if (!categoryGroups.has(category)) {
-      categoryGroups.set(category, []);
+      categoryGroups.set(
+        category,
+        []
+      );
     }
 
     categoryGroups
@@ -224,9 +706,24 @@ function buildInitialStoreAssortment(
   }
 
   /**
-   * Sort categories by number of
-   * available products.
+   * STEP 7
+   *
+   * Sort each category by score.
    */
+  for (const categoryProducts of categoryGroups.values()) {
+    categoryProducts.sort(
+      (a, b) => b.score - a.score
+    );
+  }
+
+  /**
+   * STEP 8
+   *
+   * First pass:
+   * one strong product from each category.
+   */
+  const selected = [];
+
   const categories = [
     ...categoryGroups.entries(),
   ].sort(
@@ -234,19 +731,20 @@ function buildInitialStoreAssortment(
       b[1].length - a[1].length
   );
 
-  const selected = [];
-
-  /**
-   * First pass:
-   * Take one strong product from
-   * every category.
-   */
-  for (const [category, categoryProducts] of categories) {
-    if (selected.length >= targetCount) {
+  for (
+    const [, categoryProducts]
+    of categories
+  ) {
+    if (
+      selected.length >=
+      targetCount
+    ) {
       break;
     }
 
-    if (categoryProducts.length > 0) {
+    if (
+      categoryProducts.length > 0
+    ) {
       selected.push(
         categoryProducts.shift()
       );
@@ -254,13 +752,17 @@ function buildInitialStoreAssortment(
   }
 
   /**
-   * Second pass:
-   * Fill remaining slots using
+   * STEP 9
+   *
+   * Fill remaining slots with
    * highest-scoring products.
    */
   const remaining = [];
 
-  for (const [, categoryProducts] of categories) {
+  for (
+    const [, categoryProducts]
+    of categories
+  ) {
     remaining.push(
       ...categoryProducts
     );
@@ -271,7 +773,10 @@ function buildInitialStoreAssortment(
   );
 
   for (const product of remaining) {
-    if (selected.length >= targetCount) {
+    if (
+      selected.length >=
+      targetCount
+    ) {
       break;
     }
 
@@ -279,45 +784,65 @@ function buildInitialStoreAssortment(
   }
 
   /**
-   * Remove internal score before
-   * returning API response.
+   * STEP 10
+   *
+   * Build API response.
    */
-  const finalProducts = selected.map(
-    (product, index) => ({
-      productId: product.productId,
-      productName: product.productName,
-      sku: product.sku,
-      brand: product.brand,
-      category: product.category,
-      subCategory: product.subCategory,
-      mrp: product.mrp,
-      cost: product.cost,
-      coldChainProduct:
-        product.coldChainProduct,
-      shelfLife: product.shelfLife,
+  const finalProducts =
+    selected.map(
+      (product, index) => ({
+        productId:
+          product.productId,
 
-      /**
-       * Useful for frontend/business logic.
-       */
-      recommendationRank: index + 1,
+        productName:
+          product.productName,
 
-      /**
-       * Suggested starting quantity.
-       *
-       * We keep this simple initially.
-       * Later we can make it category/price based.
-       */
-      suggestedInitialQuantity:
-        product.mrp <= 20
-          ? 10
-          : product.mrp <= 50
-          ? 6
-          : 3,
-    })
-  );
+        sku:
+          product.sku,
+
+        brand:
+          product.brand,
+
+        category:
+          product.category,
+
+        subCategory:
+          product.subCategory,
+
+        mrp:
+          product.mrp,
+
+        cost:
+          product.cost,
+
+        coldChainProduct:
+          product.coldChainProduct,
+
+        shelfLife:
+          product.shelfLife,
+
+        recommendationRank:
+          index + 1,
+
+        suggestedInitialQuantity:
+          product.mrp <= 10
+            ? 10
+            : product.mrp <= 20
+            ? 8
+            : product.mrp <= 50
+            ? 5
+            : 3,
+      })
+    );
+
+  console.log("");
 
   console.log(
     `Final store products: ${finalProducts.length}`
+  );
+
+  console.log(
+    `Target store products: ${targetCount}`
   );
 
   console.log("");
@@ -325,7 +850,7 @@ function buildInitialStoreAssortment(
   finalProducts.forEach(
     (product, index) => {
       console.log(
-        `${index + 1}. ${product.productName} | ${product.sku} | ${product.category}`
+        `${index + 1}. ${product.productName} | ${product.sku} | ${product.category} | ₹${product.mrp}`
       );
     }
   );
@@ -334,6 +859,13 @@ function buildInitialStoreAssortment(
 }
 
 module.exports = {
+  getDemandPriorityScore,
+  determinePriceSensitivity,
+  calculatePriceScore,
+  calculateMarginScore,
+  calculateShelfLifeScore,
+  calculateColdChainScore,
+  calculateDemandMatchScore,
   calculateProductScore,
   filterProducts,
   buildInitialStoreAssortment,
