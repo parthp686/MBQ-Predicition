@@ -6,49 +6,76 @@ const {
 
 const router = express.Router();
 
-router.get("/analyze", async (req, res) => {
+router.post("/analyze", async (req, res) => {
   try {
-    const { lat, lon, radius } = req.query;
+    const {
+      latitude,
+      longitude,
+      radius = 1000,
+    } = req.body;
 
-    // Validate latitude and longitude
-    if (lat === undefined || lon === undefined) {
+    // ==========================================
+    // VALIDATE INPUT
+    // ==========================================
+
+    if (
+      latitude === undefined ||
+      longitude === undefined
+    ) {
       return res.status(400).json({
         success: false,
-        error: "lat and lon are required.",
-        example: "/api/location/analyze?lat=22.69275&lon=75.867639",
+        error: "latitude and longitude are required.",
       });
     }
 
-    const latitude = Number(lat);
-    const longitude = Number(lon);
+    const lat = Number(latitude);
+    const lon = Number(longitude);
+    const searchRadius = Number(radius);
 
-    const searchRadius =
-      radius === undefined ? 1000 : Number(radius);
+    // ==========================================
+    // VALIDATE LATITUDE
+    // ==========================================
 
-    // Validate latitude
-    if (!Number.isFinite(latitude) || latitude < -90 || latitude > 90) {
+    if (
+      !Number.isFinite(lat) ||
+      lat < -90 ||
+      lat > 90
+    ) {
       return res.status(400).json({
         success: false,
-        error: "lat must be a valid latitude between -90 and 90.",
+        error:
+          "latitude must be a valid number between -90 and 90.",
       });
     }
 
-    // Validate longitude
-    if (!Number.isFinite(longitude) || longitude < -180 || longitude > 180) {
+    // ==========================================
+    // VALIDATE LONGITUDE
+    // ==========================================
+
+    if (
+      !Number.isFinite(lon) ||
+      lon < -180 ||
+      lon > 180
+    ) {
       return res.status(400).json({
         success: false,
-        error: "lon must be a valid longitude between -180 and 180.",
+        error:
+          "longitude must be a valid number between -180 and 180.",
       });
     }
 
-    // Validate radius
+    // ==========================================
+    // VALIDATE RADIUS
+    // ==========================================
+
     if (
       !Number.isFinite(searchRadius) ||
       searchRadius <= 0
     ) {
       return res.status(400).json({
         success: false,
-        error: "radius must be a valid number greater than 0.",
+        error:
+          "radius must be a valid number greater than 0.",
       });
     }
 
@@ -56,45 +83,39 @@ router.get("/analyze", async (req, res) => {
     console.log("LOCATION API REQUEST");
     console.log("================================");
 
-    console.log(`Latitude: ${latitude}`);
-    console.log(`Longitude: ${longitude}`);
+    console.log(`Latitude: ${lat}`);
+    console.log(`Longitude: ${lon}`);
     console.log(`Radius: ${searchRadius}m`);
 
-    // Run location analysis
+    // ==========================================
+    // RUN LOCATION ANALYSIS
+    // ==========================================
+
     const result = await analyzeLocation(
-      latitude,
-      longitude,
+      lat,
+      lon,
       searchRadius
     );
 
-    // Print complete AI recommendation in terminal
-    console.log("\n================================");
-    console.log("AI CART RECOMMENDATION");
-    console.log("================================");
+    // ==========================================
+    // RETURN RESULT
+    // ==========================================
 
-    if (result.recommendations) {
-      console.log(
-        JSON.stringify(result.recommendations, null, 2)
-      );
-    } else {
-      console.log("No AI recommendation returned.");
-    }
-
-    console.log("================================\n");
-
-    // Return result to browser
-    // nearbyPlaces should NOT be included here.
     return res.status(200).json({
       success: true,
       data: result,
     });
+
   } catch (error) {
+
     console.error("\nLocation analysis error:");
     console.error(error);
 
     return res.status(500).json({
       success: false,
-      error: error.message || "Location analysis failed.",
+      error:
+        error.message ||
+        "Location analysis failed.",
     });
   }
 });

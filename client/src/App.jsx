@@ -26,6 +26,88 @@ const DEFAULT_LOCATION = {
   longitude: 75.908785,
 };
 
+const PLACE_CATEGORY_LABELS = {
+  schools: "Schools",
+  colleges: "Colleges",
+  universities: "Universities",
+  hospitals: "Hospitals",
+  clinics: "Clinics",
+  pharmacies: "Pharmacies",
+  hotels: "Hotels",
+  restaurants: "Restaurants",
+  fastFood: "Fast Food",
+  cafes: "Cafes",
+  foodCourts: "Food Courts",
+  supermarkets: "Supermarkets",
+  convenienceStores: "Convenience Stores",
+  bakeries: "Bakeries",
+  departmentStores: "Department Stores",
+  busStops: "Bus Stops",
+  markets: "Markets",
+  gyms: "Gyms",
+  offices: "Offices",
+  other: "Other",
+};
+
+function escapeCsvValue(value) {
+  const stringValue =
+    value === null || value === undefined
+      ? ""
+      : String(value);
+
+  if (/[",\n]/.test(stringValue)) {
+    return `"${stringValue.replace(/"/g, '""')}"`;
+  }
+
+  return stringValue;
+}
+
+function downloadProductsCSV(products) {
+  const headers = [
+    "Product Name",
+    "Brand",
+    "SKU",
+    "Category",
+    "Sub Category",
+    "MRP",
+    "Suggested Quantity",
+    "Recommendation Rank",
+  ];
+
+  const rows = products.map((product) => [
+    product.productName,
+    product.brand,
+    product.sku,
+    product.category,
+    product.subCategory,
+    product.mrp,
+    product.suggestedInitialQuantity,
+    product.recommendationRank,
+  ]);
+
+  const csvContent = [headers, ...rows]
+    .map((row) =>
+      row.map(escapeCsvValue).join(",")
+    )
+    .join("\n");
+
+  const blob = new Blob([csvContent], {
+    type: "text/csv;charset=utf-8;",
+  });
+
+  const url = URL.createObjectURL(blob);
+
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = "recommended-products.csv";
+
+  document.body.appendChild(link);
+  link.click();
+  document.body.removeChild(link);
+
+  URL.revokeObjectURL(url);
+}
+
 function LocationMarker({ location, setLocation }) {
   useMapEvents({
     click(event) {
@@ -73,7 +155,18 @@ function App() {
       });
 
       const response = await fetch(
-        `http://localhost:5000/api/location/analyze?lat=${location.latitude}&lon=${location.longitude}&radius=${radius}`
+        "http://localhost:5000/api/location/analyze",
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            latitude: location.latitude,
+            longitude: location.longitude,
+            radius: radius,
+          }),
+        }
       );
 
       console.log(
@@ -230,6 +323,7 @@ function App() {
           onClick={analyzeLocation}
           disabled={loading}
         >
+          {loading && <span className="spinner" />}
           {loading
             ? "Analyzing Location..."
             : "Analyze Location"}
@@ -270,16 +364,86 @@ function App() {
             </div>
 
             <h3>
-              Recommended Store Products
+              Nearby Places Breakdown
             </h3>
+
+            {(() => {
+              const categories = Object.entries(
+                result.areaAnalysis || {}
+              )
+                .filter(
+                  ([key]) => key !== "totalPlaces"
+                )
+                .sort(([, a], [, b]) => b - a);
+
+              if (categories.length === 0) {
+                return (
+                  <p className="helper">
+                    No category data available.
+                  </p>
+                );
+              }
+
+              return (
+                <div className="breakdown-grid">
+                  {categories.map(
+                    ([key, count], index) => (
+                      <div
+                        className={
+                          count > 0
+                            ? "breakdown-item"
+                            : "breakdown-item zero"
+                        }
+                        key={key}
+                        style={{
+                          animationDelay: `${
+                            index * 0.04
+                          }s`,
+                        }}
+                      >
+                        <span>
+                          {PLACE_CATEGORY_LABELS[key] ||
+                            key}
+                        </span>
+                        <strong>{count}</strong>
+                      </div>
+                    )
+                  )}
+                </div>
+              );
+            })()}
+
+            <div className="section-header">
+              <h3>
+                Recommended Store Products
+              </h3>
+
+              <button
+                className="download-button"
+                type="button"
+                disabled={
+                  !result.recommendedProducts?.length
+                }
+                onClick={() =>
+                  downloadProductsCSV(
+                    result.recommendedProducts || []
+                  )
+                }
+              >
+                Download CSV
+              </button>
+            </div>
 
             <div className="products">
 
               {result.recommendedProducts?.map(
-                (product) => (
+                (product, index) => (
                   <div
                     className="product"
                     key={product.productId}
+                    style={{
+                      animationDelay: `${index * 0.05}s`,
+                    }}
                   >
                     <div>
                       <strong>

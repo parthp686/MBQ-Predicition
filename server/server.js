@@ -12,8 +12,6 @@ app.use(
 );
 
 app.use(express.json());
-
-
 app.use("/api/location", locationRoutes);
 
 const PORT = process.env.PORT || 5000;
